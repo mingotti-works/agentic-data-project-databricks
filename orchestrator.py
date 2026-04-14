@@ -40,13 +40,19 @@ from config import PipelineConfig, get_spark
 # Main entry point
 # ---------------------------------------------------------------------------
 
-def run_pipeline(config: PipelineConfig | None = None) -> dict[str, Any]:
+def run_pipeline(config_path: str | None = None) -> dict[str, Any]:
     """
     Execute the full pipeline. Returns a summary dict.
+
+    Args:
+        config_path: optional explicit path to pipeline_config.json.
+                     Falls back to PIPELINE_CONFIG_PATH env var,
+                     then to pipeline_config.json beside this module.
+
     Wraps everything in an MLflow run for audit and traceability.
     """
-    if config is None:
-        config = PipelineConfig()
+    config = PipelineConfig.from_json(config_path)
+    print(f"[ORCHESTRATOR] Config loaded from: {config.config_path}")
 
     spark = get_spark()
 
@@ -64,8 +70,7 @@ def run_pipeline(config: PipelineConfig | None = None) -> dict[str, Any]:
     with mlflow.start_run(run_name=f"discovery_pipeline_{datetime.utcnow():%Y%m%d_%H%M%S}"):
 
         # ── Log pipeline config (sanitised — no passwords) ─────────────
-        safe_config = _sanitise_config(config)
-        mlflow.log_params({k: str(v)[:250] for k, v in safe_config.items()})
+        mlflow.log_params({k: str(v)[:250] for k, v in config.to_dict().items()})
 
         # ── PHASE 1: Discovery ─────────────────────────────────────────
         t0 = time.time()
@@ -184,7 +189,7 @@ def get_review_queue(config: PipelineConfig | None = None) -> dict[str, Any]:
     Intended for use in a Databricks review notebook or dashboard.
     """
     if config is None:
-        config = PipelineConfig()
+        config = PipelineConfig.from_json()
 
     spark = get_spark()
 
@@ -212,21 +217,6 @@ def get_review_queue(config: PipelineConfig | None = None) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _sanitise_config(config: PipelineConfig) -> dict[str, Any]:
-    """Return a flat config dict safe to log (no passwords)."""
-    return {
-        "volume_paths":                 str(config.volume_paths),
-        "jdbc_source_count":            len(config.jdbc_sources),
-        "jdbc_source_names":            [j["name"] for j in config.jdbc_sources],
-        "output_catalog":               config.output_catalog,
-        "output_schema":                config.output_schema,
-        "profiling_sample_rows":        config.profiling_sample_rows,
-        "relationship_overlap_threshold": config.relationship_overlap_threshold,
-        "auto_accept_confidence":       config.auto_accept_confidence,
-        "human_review_confidence":      config.human_review_confidence,
-        "llm_provider":                 config.llm_provider,
-    }
 
 
 def _print_summary(
@@ -279,5 +269,4 @@ def _print_summary(
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    cfg = PipelineConfig()
-    run_pipeline(cfg)
+    run_pipeline()
